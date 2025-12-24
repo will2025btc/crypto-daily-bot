@@ -1,0 +1,24 @@
+name: Daily Crypto Bot
+on:
+  schedule:
+    - cron: '0 0 * * *' # 每天北京时间早上8点运行
+  workflow_dispatch: # 增加这个按钮，方便我们手动测试
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run logic
+        env:
+          FOLLOWIN_API_KEY: ${{ secrets.FOLLOWIN_API_KEY }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python main.py
