@@ -1,46 +1,73 @@
 import requests
 import os
-# 1. 自动从保险箱读取秘钥
-FOLLOWIN_API_KEY = os.getenv('FOLLOWIN_API_KEY')
-AI_API_KEY = os.getenv('AI_API_KEY')
-AI_BASE_URL = os.getenv('AI_BASE_URL')
-TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN')
-TG_CHAT_ID = os.getenv('TG_CHAT_ID')
+import sys
 
-def fetch_data(url):
-    headers = {'apikey': FOLLOWIN_API_KEY}
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        return str(response.json().get('data', []))[:2000] # 截取一段防止数据太长
-    return ""
+# 获取配置并打印检查（不会打印出真正的KEY，请放心）
+def get_config(name):
+    val = os.getenv(name)
+    if not val:
+        print(f"❌ 错误：缺少保险箱钥匙 {name}")
+    return val
+
+FOLLOWIN_API_KEY = get_config('FOLLOWIN_API_KEY')
+AI_API_KEY = get_config('AI_API_KEY')
+AI_BASE_URL = get_config('AI_BASE_URL')
+TG_BOT_TOKEN = get_config('TG_BOT_TOKEN')
+TG_CHAT_ID = get_config('TG_CHAT_ID')
 
 def main():
-    # 2. 抓取你提供的四个接口
+    # 1. 抓取数据
+    print("正在从 Followin 抓取数据...")
+    headers = {'apikey': FOLLOWIN_API_KEY}
     urls = [
         "https://api.followin.io/open/feed/news",
-        "https://api.followin.io/open/feed/list/trending",
-        "https://api.followin.io/open/feed/list/tag/opinions",
-        "https://api.followin.io/open/feed/list/tag"
+        "https://api.followin.io/open/feed/list/trending"
     ]
-    all_data = ""
+    raw_info = ""
     for url in urls:
-        all_data += fetch_data(url) + "\n"
+        try:
+            r = requests.get(url, headers=headers, timeout=15)
+            if r.status_code == 200:
+                raw_info += str(r.json().get('data', []))[:1000]
+        except Exception as e:
+            print(f"⚠️ 抓取 {url} 出错: {e}")
 
-    # 3. 让 AI 整理
-    prompt = f"你是一个币圈专家，请根据以下原始信息总结一份简洁、有Emoji的中文日报：\n{all_data}"
+    if len(raw_info) < 100:
+        print("❌ 抓取到的数据太少，请检查 Followin API Key 是否正确。")
+        sys.exit(1)
+
+    # 2. AI 总结
+    print("正在请求 AI 整理日报...")
+    # 确保 URL 结尾有斜杠
+    base_url = AI_BASE_URL if AI_BASE_URL.endswith('/') else AI_BASE_URL + '/'
     
-    ai_payload = {
-        "model": "gemini-1.5-flash", # 改成谷歌的模型名称
-        "messages": [{"role": "user", "content": prompt}]
+    payload = {
+        "model": "gemini-1.5-flash",
+        "messages": [{"role": "user", "content": f"总结这份加密日报：{raw_info}"}]
     }
-    ai_res = requests.post(f"{AI_BASE_URL}/chat/completions", 
-                           headers={"Authorization": f"Bearer {AI_API_KEY}"}, 
-                           json=ai_payload)
-    report = ai_res.json()['choices'][0]['message']['content']
+    try:
+        res = requests.post(f"{base_url}chat/completions", 
+                            headers={"Authorization": f"Bearer {AI_API_KEY}"}, 
+                            json=payload)
+        res.raise_for_status()
+        report = res.json()['choices'][0]['message']['content']
+        print("✅ AI 总结完成")
+    except Exception as e:
+        print(f"❌ AI 环节出错: {e}")
+        if 'res' in locals(): print(f"返回内容: {res.text}")
+        sys.exit(1)
 
-    # 4. 发送到 TG
-    requests.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage", 
-                  data={"chat_id": TG_CHAT_ID, "text": report})
+    # 3. 发送 TG
+    print(f"正在发送到频道 {TG_CHAT_ID}...")
+    try:
+        tg_url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+        tg_res = requests.post(tg_url, data={"chat_id": TG_CHAT_ID, "text": report})
+        tg_res.raise_for_status()
+        print("🎉 发送成功！")
+    except Exception as e:
+        print(f"❌ TG 发送失败: {e}")
+        if 'tg_res' in locals(): print(f"返回内容: {tg_res.text}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
