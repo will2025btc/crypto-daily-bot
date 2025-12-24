@@ -1,122 +1,74 @@
 import requests
 import os
 import sys
-import json
 
-# --- 配置读取 ---
-FOLLOWIN_API_KEY = os.getenv('FOLLOWIN_API_KEY')
-AI_API_KEY = os.getenv('AI_API_KEY')
+# 读取配置
 TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN')
-
-# 【这里直接写死你的频道地址】
-# 既然是公开频道，直接写在这里最稳，绝对不会错！
-TG_CHAT_ID = '@fwdailynews'
+# 这里填你确定的频道地址
+TARGET_CHANNEL = '@fwdailynews'
 
 def main():
-    # ==========================
-    # 第一步：抓取 Followin 数据
-    # ==========================
-    print("1. 🕵️ 正在抓取 Followin 数据...")
-    headers = {'Authorization': FOLLOWIN_API_KEY}
-    url = "https://api.followin.io/open/feed/news"
+    print("============== 🕵️‍♂️ 侦探模式启动 ==============")
     
+    # --- 1. 查户口：这个 Token 到底是谁的？ ---
+    print("1. 正在检查机器人身份...")
     try:
-        r = requests.get(url, headers=headers, timeout=15)
-        if r.status_code != 200:
-            print(f"❌ Followin 接口报错: {r.status_code}")
-            sys.exit(1)
-            
-        raw_data = r.json().get('data', [])
+        me_url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getMe"
+        me_res = requests.get(me_url).json()
         
-        # 数据清洗
-        news_list = []
-        if isinstance(raw_data, dict):
-            news_list = [raw_data]
-        elif isinstance(raw_data, list):
-            news_list = raw_data
+        if me_res.get('ok'):
+            bot_username = me_res['result']['username']
+            bot_name = me_res['result']['first_name']
+            print(f"✅ 身份确认成功！")
+            print(f"🤖 机器人用户名 (ID): @{bot_username}")
+            print(f"👤 机器人昵称 (Name): {bot_name}")
+            print("-------------------------------------------")
+            print("👉 请务必检查：这个 @名字 和你在频道里添加的管理员是同一个吗？")
+            print("-------------------------------------------")
         else:
-            news_list = []
-
-        print(f"✅ 成功获取 {len(news_list)} 条数据。")
-
-        # 提取标题
-        context = ""
-        for item in news_list[:10]:
-            title = item.get('title', '无标题')
-            context += f"- {title}\n"
-            
-        if not context:
-            print("❌ 未提取到有效内容。")
+            print(f"❌ Token 无效！Telegram 拒绝识别。")
+            print(f"错误信息: {me_res}")
             sys.exit(1)
-
+            
     except Exception as e:
-        print(f"💥 抓取环节失败: {e}")
+        print(f"💥 连接 Telegram 失败: {e}")
         sys.exit(1)
 
-    # ==========================
-    # 第二步：调用 DeepSeek AI
-    # ==========================
-    print("2. 🤖 正在请求 DeepSeek AI...")
-    ai_url = "https://api.deepseek.com/chat/completions"
+    # --- 2. 试开门：强制发送一条测试消息 ---
+    print(f"\n2. 正在尝试向频道 {TARGET_CHANNEL} 发送测试消息...")
     
-    prompt = f"你是一个币圈资深分析师。请根据以下快讯标题，总结一份中文加密日报。要求：包含【今日看点】和【市场情绪】，多用Emoji，排版要适合手机阅读。内容如下：\n{context}"
-    
+    send_url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
     payload = {
-        "model": "deepseek-chat",
-        "messages": [
-            {"role": "system", "content": "你是一个专业的加密货币分析师。"},
-            {"role": "user", "content": prompt}
-        ],
-        "stream": False
-    }
-    
-    headers_ai = {
-        "Authorization": f"Bearer {AI_API_KEY}",
-        "Content-Type": "application/json"
+        "chat_id": TARGET_CHANNEL,
+        "text": "🔍 这是一条测试消息。\n如果你看到了它，说明【频道地址】和【机器人权限】都没问题！"
     }
     
     try:
-        res = requests.post(ai_url, json=payload, headers=headers_ai, timeout=60)
+        r = requests.post(send_url, json=payload)
+        response_json = r.json()
         
-        if res.status_code == 200:
-            ai_data = res.json()
-            if "choices" in ai_data and len(ai_data["choices"]) > 0:
-                report = ai_data["choices"][0]["message"]["content"]
-                print("✅ AI 总结完成！")
-            else:
-                print(f"❌ AI 返回内容为空: {res.text}")
-                sys.exit(1)
+        print(f"📡 Telegram 服务器返回的状态码: {r.status_code}")
+        print(f"📝 Telegram 返回的完整回执:\n{response_json}")
+        
+        if response_json.get('ok'):
+            print("\n🎉 结论：发送成功！请现在去频道看一眼。")
         else:
-            print(f"❌ AI 请求被拒绝 (Code {res.status_code}): {res.text}")
-            sys.exit(1)
+            print("\n❌ 结论：发送失败！")
+            error_desc = response_json.get('description', '未知错误')
+            print(f"💀 失败原因: {error_desc}")
             
-    except Exception as e:
-        print(f"💥 AI 网络请求失败: {e}")
-        sys.exit(1)
+            # 智能分析错误原因
+            if "chat not found" in error_desc:
+                print("💡 分析：频道地址写错了，或者机器人还没被拉进频道。")
+            elif "Unauthorized" in error_desc:
+                print("💡 分析：Token 可能是旧的，或者机器人被删除了。")
+            elif "Rights" in error_desc:
+                print("💡 分析：机器人虽然在频道里，但没有【发布消息】的管理员权限。")
 
-    # ==========================
-    # 第三步：推送 Telegram (硬编码地址版)
-    # ==========================
-    print(f"3. 🚀 正在推送到频道: {TG_CHAT_ID} ...")
-    tg_url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-    
-    try:
-        # 优先 Markdown
-        tg_res = requests.post(tg_url, data={
-            "chat_id": TG_CHAT_ID, 
-            "text": report,
-            "parse_mode": "Markdown"
-        })
-        
-        if tg_res.status_code == 200:
-            print("🎉【大功告成】日报已发送！")
-        else:
-            print("⚠️ Markdown 发送失败，切换纯文本模式...")
-            requests.post(tg_url, data={"chat_id": TG_CHAT_ID, "text": report})
-            print("🎉【纯文本已发】日报已送达！")
-            
     except Exception as e:
-        print(f"❌ TG 发送失败: {e}")
+        print(f"💥 发送环节报错: {e}")
+
+    print("============== 侦探模式结束 ==============")
 
 if __name__ == "__main__":
     main()
