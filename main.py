@@ -99,15 +99,43 @@ def main():
         print(f"💥 AI 连接失败: {e}"); sys.exit(1)
 
     # ---------------------------------------------------
-    # 第三步：发送到 Telegram 频道
+    # 第三步：Baoyu Skill 配图
     # ---------------------------------------------------
-    print(f"3. 🚀 正在发送到频道 {TG_CHAT_ID}...")
+    print("3. 🎨 正在生成 Baoyu 配图...")
+    try:
+        from baoyu_skill import generate_text_card, send_photo_to_telegram
+        # 从 AI 日报中提取关键行作为卡片内容
+        lines = [l.strip() for l in ai_content.split('\n') if l.strip()]
+        card_lines = lines[:10]  # 取前10行作为卡片内容
+        card_title = card_lines[0] if card_lines else "Crypto Daily"
+        card_body = card_lines[1:] if len(card_lines) > 1 else ["暂无内容"]
+
+        card_path = generate_text_card(card_title, card_body, output_path="/tmp/daily_card.png")
+        print("✅ 配图生成完毕！")
+    except Exception as e:
+        print(f"⚠️ 配图生成失败（不影响日报发送）: {e}")
+        card_path = None
+
+    # ---------------------------------------------------
+    # 第四步：发送到 Telegram 频道
+    # ---------------------------------------------------
+    print(f"4. 🚀 正在发送到频道 {TG_CHAT_ID}...")
+
+    # 先发配图（如果有）
+    if card_path:
+        try:
+            send_photo_to_telegram(card_path, caption="📊 今日速览",
+                                   bot_token=TG_BOT_TOKEN, chat_id=TG_CHAT_ID)
+        except Exception as e:
+            print(f"⚠️ 配图发送失败: {e}")
+
+    # 再发文字日报
     tg_url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-    
+
     # 尝试 Markdown 发送（好看）
     data_md = {"chat_id": TG_CHAT_ID, "text": ai_content, "parse_mode": "Markdown"}
     res_md = requests.post(tg_url, data=data_md)
-    
+
     if res_md.status_code == 200:
         print("🎉【完美成功】Markdown 格式日报已发出！")
     else:
